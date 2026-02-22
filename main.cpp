@@ -3,25 +3,9 @@
 #include <cmath>
 #include <complex>
 #include <fstream>
+#include <thread>
 
 using Comp = std::complex<float>;
-
-extern "C" {
-    #define STB_IMAGE_IMPLEMENTATION
-    #include "stb_image.h"
-}
-
-bool load_image(std::vector<unsigned char>& image, const std::string& filename, int& x, int&y)
-{
-    int n;
-    unsigned char* data = stbi_load(filename.c_str(), &x, &y, &n, 4);
-    if (data != nullptr)
-    {
-        image = std::vector<unsigned char>(data, data + x * y * 4);
-    }
-    stbi_image_free(data);
-    return (data != nullptr);
-}
 
 class Polynomial{
 public:
@@ -36,176 +20,145 @@ public:
 	}
 
 	Comp derivative(Comp x) {
-		Comp result;
+		Comp result = 0;
 
-		for(int i = 0; i < n; i++) {
-			Comp a = x + roots[i==0?1:0];
-
-			for(int j = i==0?2:1; j < n; j++)
-				if(j != i)
-					a *= x + roots[j];
-
-			result += a;
+		Comp d[n + 1];
+		d[n] = 1;
+		for (int i = n - 1; i >= 1; i--) {
+			d[i] = d[i + 1] * (x - roots[i]);
 		}
 
-		return result;
+		Comp t = 1;
+		for(int i = 0; i < n; i++) {
+			result += t * d[i + 1];
+			t *= x - roots[i];
+		}
+
+		return result * 1000.0f;
 	}
 
-	Comp get(Comp x) {
+	Comp eval(Comp x) {
 		Comp result = 1;
 
 		for(int i = 0; i < n; i++) {
-			result *= x + roots[i];
+			result *= x - roots[i];
 		}
 
-		return result;
+		return result * 1000.0f;
 	}
 
-	Comp newtonsMethod(Comp x_, int iters=100) {
-		Comp x = x_;
+	Comp newtonsMethod(Comp x_0, int iters) {
+		Comp x = x_0;
 		for (int i = 0; i < iters; i++) {
-			Comp d = derivative(x);
+			Comp der = derivative(x);
 
-			if (std::real(d) != 0) {
-				x = x - get(x)/d;
+			if (std::real(der) != 0) {
+				x = x - eval(x) / der;
 			}
 		}
 
 		return x;
 	}
 
-	int findNearestRoot(Comp x_, int iters=100) {
-		Comp x = newtonsMethod(x_, iters);
+	int findNearestRoot(Comp x_0, int iters) {
+		Comp x = newtonsMethod(x_0, iters);
 
-		int r = 0;
-		float d = 1000000.0f;
-
-		int i = 0;
-		for(Comp root : roots) {
-			float xx = (float)std::real(root)-(float)std::real(x);
-			float yy = (float)std::imag(root)-(float)std::imag(x);
-
-			float dn = xx*xx+yy*yy;
-
-			if(dn < d) {
-				d = dn;
-				r = i;
+		int best = 0;
+		for(int i = 1; i < roots.size(); i++) {
+			if (std::norm(x - roots[i]) < std::norm(x - roots[best])) {
+				best = i;
 			}
-			i++;
 		}
 
-		return r;
+		return best;
 	}
 };
 
-int clip(int a, int b, int c){
-	return (a > c) ? c : (a < b) ? b : a;
-}
-
-float clipf(float a, float b, float c) {
-	return (a > c) ? c : (a < b) ? b : a;
-}
-
-int clip256(int a) {
+int clip_u8(int a) {
 	return (a > 255) ? 255 : (a < 0) ? 0 : a;
 }
 
-struct Img{
-	std::vector<unsigned char> pixels;
-	int width;
-	int height;
-};
+const int	Height = 1600, Width = Height * 8 / 5;
+const int total = 40;
+const float radius = 1.0f;
 
-Img getImage() {
-    std::string filename = "in.png";
-    
-    int width, height;
-    std::vector<unsigned char> image;
-
-    bool success = load_image(image, filename, width, height);
-    if (!success) std::cout << "Error loading image\n";
-	else std::cout << "image loaded successfuly!\n";
-
-	Img img = {
-		image,
-		width, 
-		height
-	};
-
-	return img;
-}
-
-void complexSample(Img img, Comp p, int* s, float scale = 1.0f) {
-	int	x = clip((std::real(p)/scale/2.0f+0.5f)*img.width, 0, img.width),
-		y = clip((std::imag(p)/scale/2.0f+0.5f)*img.height, 0, img.height);
-
-	s[0] = img.pixels[4*(x+y*img.width)+0];
-	s[1] = img.pixels[4*(x+y*img.width)+1];
-	s[2] = img.pixels[4*(x+y*img.width)+2];
-	s[3] = img.pixels[4*(x+y*img.width)+3];
+void render_rows(Polynomial p, int start, int end, std::vector<int> &res) {
+	for (int y = start; y < end; y++) {
+		for (int x = 0; x < Width; x++)	{
+			res[y * Width + x] = p.findNearestRoot(
+				Comp(
+					x / (float)Width  * 1.6f * radius - 0.8f * radius,
+					y / (float)Height * 1.0f * radius - 0.5f * radius
+				), 60);
+		}
+		std::cout << (float)(y - start)/(float)(end - start)*100.0f << "%\n";
+	}
 }
 
 int main() {
-	srand(69);
-	const int	Width = 256,
-				Height = 256;
+	srand(420);
 
-	const int  total_colors = 100;
-	int colors[total_colors][3];
+	int colors[total][3];
 
-	for(int i = 0; i < total_colors; i++)
+	for(int i = 0; i < total; i++) {
 		for(int j = 0; j < 3; j++) {
-			int c = rand()%16;
-			colors[i][j] = 255-c*c;
+			int c = rand() % 16;
+			colors[i][j] = 255 - c * c;
 		}
+	}
 
-	Img image = getImage();
+	colors[0][0] = 0;
+	colors[0][1] = 0;
+	colors[0][2] = 0;
 
 	std::ofstream out;
 	out = std::ofstream("out.ppm");
 	out << "P3\n"
 		<< Width << ' ' << Height << ' ' << "255\n";
-		
+
 	Polynomial p;
-	
-	float total = 20.0f;
 
-	for (int i = 0; i < total; i++){
-		float t = (float)i/total;
-		float a = (1.0f-t) * 2.0f * 3.1415926535f;
-
-		std::cout 	<< "t: " << t << "\n"
-					<< "a: " << a << "\n";
-		std::cout 	<< "x: " << cos(a) << "\n"
-					<< "y: " << sin(a) << "\n\n";
+	for (int i = 0; i < total; i++) {
+		float t = (float)i / (float)total;
+		float a = (float)i * 1.6182;
+		float r = (i % 3 + 1) * (i % 5 + 1) * (i % 7 + 1) * (i % 11 + 1) * (i % 13 + 1) * (i % 17 + 1) / 10000.0;
 
 		p.addRoot(Comp(
-			cos(a) * 0.5f * (i%2+1) * (i%4+1),
-			sin(a) * 0.5f * (i%2+1) * (i%4+1)
+			cos(a) * r,
+			sin(a) * r
 		));
 	}
 
-	for (int y = 0; y < Height; y++){
+	std::vector<int> result;
+	result.reserve(Width * Height);
+
+	int dr = Height / 8;
+	std::thread t1(render_rows, p, dr * 0, dr * 0 + dr, std::ref(result));
+	std::thread t2(render_rows, p, dr * 1, dr * 1 + dr, std::ref(result));
+	std::thread t3(render_rows, p, dr * 2, dr * 2 + dr, std::ref(result));
+	std::thread t4(render_rows, p, dr * 3, dr * 3 + dr, std::ref(result));
+	std::thread t5(render_rows, p, dr * 4, dr * 4 + dr, std::ref(result));
+	std::thread t6(render_rows, p, dr * 5, dr * 5 + dr, std::ref(result));
+	std::thread t7(render_rows, p, dr * 6, dr * 6 + dr, std::ref(result));
+	std::thread t8(render_rows, p, dr * 7, dr * 7 + dr, std::ref(result));
+
+	t1.join();
+	t2.join();
+	t3.join();
+	t4.join();
+	t5.join();
+	t6.join();
+	t7.join();
+	t8.join();
+
+	for (int y = 0; y < Height; y++) {
 		for (int x = 0; x < Width; x++)	{
-			Comp cp = p.newtonsMethod(
-				Comp(
-					x/float(Width)*4.0f-2.0f, 
-					y/float(Height)*4.0f-2.0f
-				), 21);
+			int ind = result[y * Width + x];
 
-			// int c[4];
-			// complexSample(image, cp, c, 8.0f);
+			int *c;
+			c = colors[ind];
 
-			// out << c[0] << " " << c[1] << " " << c[2] << "\n";
-
-			int r = clipf(std::imag(cp) /  4.0f + 0.0f, 0.0f, 1.0f)*255;
-			int g = clipf(std::imag(cp) / -4.0f + 0.0f, 0.0f, 1.0f)*255;
-			int b = clipf(std::imag(cp) / -4.0f + 0.0f, 0.0f, 1.0f)*255;//clipf(std::real(cp) /  4.0f + 0.0f, 0.0f, 1.0f)*255;
-
-			out << clip256(r) << ' '
-				<< clip256(g) << ' '
-				<< clip256(b) << "\n";
+			out << c[0] << " " << c[1] << " " << c[2] << "\n";
 		}
-		std::cout << (float)y/(float)Height*100.0f << "%\n";
 	}
 }

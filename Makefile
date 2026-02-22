@@ -1,4 +1,4 @@
 run:
-	g++ -o out main.cpp
+	g++ -o out -Ofast main.cpp -std=c++20
 	./out
-	convert out.ppm out.png
+	magick out.ppm -fuzz 0% -fill transparent -opaque black out.png
