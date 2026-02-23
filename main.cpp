@@ -78,18 +78,20 @@ int clip_u8(int a) {
 	return (a > 255) ? 255 : (a < 0) ? 0 : a;
 }
 
-const int	Height = 1600, Width = Height * 8 / 5;
+const int Height = 1600 * 4, Width = Height * 8 / 5;
 const int total = 40;
-const float radius = 1.0f;
+const float radius = 0.1f;
+const float re_offset = -0.03f;
+const float im_offset = -0.15f;
 
 void render_rows(Polynomial p, int start, int end, std::vector<int> &res) {
 	for (int y = start; y < end; y++) {
 		for (int x = 0; x < Width; x++)	{
 			res[y * Width + x] = p.findNearestRoot(
 				Comp(
-					x / (float)Width  * 1.6f * radius - 0.8f * radius,
-					y / (float)Height * 1.0f * radius - 0.5f * radius
-				), 60);
+					x / (float)Width  * 1.6f * radius - 0.8f * radius + re_offset,
+					y / (float)Height * 1.0f * radius - 0.5f * radius + im_offset
+				), 180);
 		}
 		std::cout << (float)(y - start)/(float)(end - start)*100.0f << "%\n";
 	}
@@ -132,24 +134,17 @@ int main() {
 	std::vector<int> result;
 	result.reserve(Width * Height);
 
-	int dr = Height / 8;
-	std::thread t1(render_rows, p, dr * 0, dr * 0 + dr, std::ref(result));
-	std::thread t2(render_rows, p, dr * 1, dr * 1 + dr, std::ref(result));
-	std::thread t3(render_rows, p, dr * 2, dr * 2 + dr, std::ref(result));
-	std::thread t4(render_rows, p, dr * 3, dr * 3 + dr, std::ref(result));
-	std::thread t5(render_rows, p, dr * 4, dr * 4 + dr, std::ref(result));
-	std::thread t6(render_rows, p, dr * 5, dr * 5 + dr, std::ref(result));
-	std::thread t7(render_rows, p, dr * 6, dr * 6 + dr, std::ref(result));
-	std::thread t8(render_rows, p, dr * 7, dr * 7 + dr, std::ref(result));
+	const int thread_count = 24;
+	std::thread threads[thread_count];
+	int dr = Height / thread_count;
 
-	t1.join();
-	t2.join();
-	t3.join();
-	t4.join();
-	t5.join();
-	t6.join();
-	t7.join();
-	t8.join();
+	for (int i = 0; i < thread_count; i++) {
+		threads[i] = std::thread(render_rows, p, dr * i, dr * i + dr, std::ref(result));
+	}
+
+	for (int i = 0; i < thread_count; i++) {
+		threads[i].join();
+	}
 
 	for (int y = 0; y < Height; y++) {
 		for (int x = 0; x < Width; x++)	{
